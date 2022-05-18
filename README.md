@@ -1,5 +1,10 @@
 # competition
 
+- CrossValidation
+  - K-Fold
+  - Group K-Fold
+  - Time series K-Fold
+
 - Models
   - LightGBM
   - Neural Network
@@ -14,11 +19,6 @@
   - One-hot Encoding
   - Target Encoding
   - Aggresion
-
--CrossValidation
-  - K-Fold
-  - Group K-Fold
-  - Time series K-Fold
 
 - Post
   - Signate Intern competition
