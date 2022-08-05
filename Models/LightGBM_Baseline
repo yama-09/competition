@@ -1,0 +1,103 @@
+import numpy as np
+import pandas as pd
+
+# グラフ描画用
+import matplotlib.pyplot as plt
+import seaborn as sns
+%matplotlib inline
+sns.set_style('darkgrid')
+
+import lightgbm as lgb
+
+from sklearn.datasets import make_classification
+from sklearn.metrics import roc_auc_score, roc_curve, accuracy_score
+from sklearn.metrics import classification_report, confusion_matrix, f1_score
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold
+import warnings
+warnings.simplefilter('ignore')
+
+
+df = pd.read_csv("./input/train.csv")
+df_test = pd.read_csv("./input/test.csv")
+
+X_train = df.drop("class",axis=1)
+y_train = df_all["class"]
+
+print("Training data shape :", X_train.shape)
+print("Test data shape :", X_test.shape)
+
+# 学習用のパラメータ
+params = {
+    "objective": "binary",      # 2値分類
+    "boosting" : "gbdt",        # default
+    "learning_rate": 0.1,       # 学習率
+    "metric": "binary_logloss", # モデルの評価指標
+    "seed": 42
+}
+
+# 交差検証設定
+skf = StratifiedKFold(n_splits=5, random_state=12, shuffle=True)
+
+# 学習記録用の入れ物を準備
+oof = pd.DataFrame()                 # Out-of-Fold 結果
+models = []                          # 各 fold のモデル
+scores = 0.0                         # Validation データでのスコア
+
+# 交差検証
+for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
+    print("Fold :", fold+1)
+    
+    # train/validation 用に lightGBM 用データセットを作成
+    X_trn, y_trn = X_train.loc[trn_idx], y_train[trn_idx]
+    X_val, y_val = X_train.loc[val_idx], y_train[val_idx]
+    
+    lgb_train = lgb.Dataset(X_trn, y_trn, weight=None)
+    lgb_eval = lgb.Dataset(X_val, y_val, weight=None)
+    
+    # model の作成、学習
+    model = lgb.train(params=params,
+                      train_set=lgb_train,
+                      valid_sets=[lgb_train, lgb_eval],
+                      num_boost_round=10000,           # 10000 round まで実行
+                      early_stopping_rounds=100,        # 100 round ごとに los を確認。改善なければ stop
+                      verbose_eval=100                  # 100 round ごとの los を表示。
+                     )
+    
+    # validation データでの予測結果
+    val_pred = model.predict(X_val)
+    val_pred = pd.Series(val_pred)
+    
+    # 判定閾値
+    
+    val_pred = val_pred.apply(lambda x : 0 if x <= 0.5 else x)
+    val_pred = val_pred.apply(lambda x : 1 if x > 0.5 else x)
+    
+    score = f1_score(y_val,val_pred, average="macro")
+    print(f"Validation Accuracy score : {score:.4f}")
+
+    scores += score / 5
+    models.append(model)
+    print("*" * 100)
+# 各 fold における Validation スコアの平均
+print(f"All fold average score : {scores:.4f}")
+
+
+X_test = df_test
+sample = pd.read_csv("./input/sample_submit.csv")
+
+# test データと同じ長さですべての要素が 0 の配列を用意
+preds = np.zeros(len(X_test))
+
+# 各モデルで推論
+for model in models:
+    pred = model.predict(X_test, num_iteration=model.best_iteration)
+    preds += pred / len(models)
+    
+# スコア
+preds = pd.Series(preds)
+preds = preds.apply(lambda x : 0 if x <= 0.5 else x)
+preds = preds.apply(lambda x : 1 if x > 0.5 else x)
+
+sample[1] = preds
+sample.to_csv("./output/submit.csv",index=None,header=None)
