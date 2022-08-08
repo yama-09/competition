@@ -27,22 +27,34 @@ y_train = df_all["class"]
 print("Training data shape :", X_train.shape)
 print("Test data shape :", X_test.shape)
 
+from sklearn.metrics import f1_score
+
+def f1(preds, data):
+    y_true = data.get_label()
+    preds = preds.reshape(4, len(preds) // 4)
+    y_pred = np.argmax(preds, axis=0)
+    score = f1_score(y_true, y_pred,average="macro")
+    return "metric_f1", score, True
+
+
+
 # 学習用のパラメータ
 params = {
-    "objective": "binary",      # 2値分類
-    "boosting" : "gbdt",        # default
-    "learning_rate": 0.1,       # 学習率
-    "metric": "binary_logloss", # モデルの評価指標
-    "seed": 42
-}
-
+            'objective': 'multiclass',
+            'num_class': 4,
+            'learning_rate': 0.01,
+            'verbose': -1,
+            'seed': 42,
+            'drop_seed': 42,
+            'data_random_seed':42
+            }
 # 交差検証設定
-skf = StratifiedKFold(n_splits=5, random_state=12, shuffle=True)
+skf = StratifiedKFold(n_splits=5, random_state=42, shuffle=True)
 
 # 学習記録用の入れ物を準備
 oof = pd.DataFrame()                 # Out-of-Fold 結果
 models = []                          # 各 fold のモデル
-scores = 0.0                         # Validation データでのスコア
+scores = []                         # Validation データでのスコア
 
 # 交差検証
 for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
@@ -61,43 +73,49 @@ for fold, (trn_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
                       valid_sets=[lgb_train, lgb_eval],
                       num_boost_round=10000,           # 10000 round まで実行
                       early_stopping_rounds=100,        # 100 round ごとに los を確認。改善なければ stop
-                      verbose_eval=100                  # 100 round ごとの los を表示。
+                      verbose_eval=500,                 # 100 round ごとの los を表示。
+                      feval=f1
                      )
     
     # validation データでの予測結果
     val_pred = model.predict(X_val)
-    val_pred = pd.Series(val_pred)
+    val_pred = val_pred.argmax(axis=1) 
+    #val_pred = pd.Series(val_pred)
     
     # 判定閾値
     
-    val_pred = val_pred.apply(lambda x : 0 if x <= 0.5 else x)
-    val_pred = val_pred.apply(lambda x : 1 if x > 0.5 else x)
+    #val_pred = val_pred.apply(lambda x : 0 if x <= 0.5 else x)
+    #val_pred = val_pred.apply(lambda x : 1 if x > 0.5 else x)
     
     score = f1_score(y_val,val_pred, average="macro")
     print(f"Validation Accuracy score : {score:.4f}")
 
-    scores += score / 5
+    scores.append(score)
     models.append(model)
     print("*" * 100)
 # 各 fold における Validation スコアの平均
-print(f"All fold average score : {scores:.4f}")
+print(f"All fold average score : {np.mean(scores):.4f}")
 
 
 X_test = df_test
-sample = pd.read_csv("./input/sample_submit.csv")
+sample = pd.read_csv("./input/submit_sample.csv",header=None)
 
 # test データと同じ長さですべての要素が 0 の配列を用意
-preds = np.zeros(len(X_test))
+preds = np.zeros((len(X_test),4))
 
+#preds = []
 # 各モデルで推論
 for model in models:
     pred = model.predict(X_test, num_iteration=model.best_iteration)
-    preds += pred / len(models)
+    preds = preds +  (pred / len(models))
+    
     
 # スコア
-preds = pd.Series(preds)
-preds = preds.apply(lambda x : 0 if x <= 0.5 else x)
-preds = preds.apply(lambda x : 1 if x > 0.5 else x)
+#preds = pd.Series(preds)
+#preds = preds.apply(lambda x : 0 if x <= 0.5 else x)
+#preds = preds.apply(lambda x : 1 if x > 0.5 else x)
 
 sample[1] = preds
-sample.to_csv("./output/submit.csv",index=None,header=None)
+sample.to_csv("./output/submit_lgb.csv",index=None,header=None)
+
+sample
